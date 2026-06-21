@@ -1,53 +1,112 @@
-class Chef:
-    def __init__(self, nombre, x, y):
-        self.nombre = nombre
-        self.x = x  # posición horizontal en pantalla
-        self.y = y  # posición vertical en pantalla
-        self.velocidad = 5  # píxeles por frame
-        self.ingrediente_en_mano = None  # empieza sin nada en la mano
-        # CORRECCIÓN: según el enunciado "cada Chef puede sostener únicamente
-        # un Ingrediente a la vez". La lista ingredientes_recolectados implicaba
-        # que el chef acumulaba varios. Se elimina: el chef solo tiene una mano.
-        # La lógica de armar la receta se maneja en la EstacionEntrega,
-        # que recibe la lista de ingredientes directamente desde la Cocina/juego.
-        self.activo = True  # indica si este chef es el que se controla ahora
+import pygame
 
-    def mover(self, dx, dy):
-        self.x += dx * self.velocidad
-        self.y += dy * self.velocidad
+CELDA = 80
+
+class Chef:
+    def __init__(self, nombre, x, y, velocidad=4, multiplicador_proceso=1.0):
+        self.nombre = nombre
+        self.velocidad = velocidad
+        self.multiplicador_proceso = multiplicador_proceso
+        self.ingrediente_en_mano = None
+        self.activo = True
+
+        self.rect = pygame.Rect(x, y, CELDA - 16, CELDA - 16)
+
+        # Holdeo de estación
+        self.progreso_proceso  = 0.0   # tiempo acumulado hoelando
+        self.estacion_actual   = None  # estación que está procesando
+
+    @property
+    def x(self):
+        return self.rect.x
+
+    @x.setter
+    def x(self, valor):
+        self.rect.x = valor
+
+    @property
+    def y(self):
+        return self.rect.y
+
+    @y.setter
+    def y(self, valor):
+        self.rect.y = valor
+
+    def mover(self, dx, dy, obstaculos, area_x, area_y, area_ancho, area_alto):
+        limite = pygame.Rect(area_x, area_y, area_ancho, area_alto)
+
+        self.rect.x += dx * self.velocidad
+        for obs in obstaculos:
+            if self.rect.colliderect(obs):
+                self.rect.x -= dx * self.velocidad
+
+        self.rect.y += dy * self.velocidad
+        for obs in obstaculos:
+            if self.rect.colliderect(obs):
+                self.rect.y -= dy * self.velocidad
+
+        self.rect.clamp_ip(limite)
+
+    def rect_interaccion(self, dx_dir, dy_dir):
+        alcance = 20
+        grosor  = self.rect.width + 16
+
+        if dx_dir == 0 and dy_dir == 0:
+            return self.rect.inflate(alcance * 2, alcance * 2)
+
+        r = pygame.Rect(0, 0, 0, 0)
+
+        if dx_dir != 0:
+            r.width  = alcance
+            r.height = grosor
+            r.centerx = self.rect.centerx + dx_dir * (self.rect.width // 2 + alcance // 2)
+            r.centery = self.rect.centery
+        else:
+            r.width  = grosor
+            r.height = alcance
+            r.centerx = self.rect.centerx
+            r.centery = self.rect.centery + dy_dir * (self.rect.height // 2 + alcance // 2)
+
+        return r
+
+    def actualizar_holdeo(self, hoeleando, estacion, delta):
+        """
+        Lllamar cada frame con si ESPACIO está presionado y la estación frente al chef.
+        Retorna True en el momento exacto que se completa el proceso.
+        """
+        if not hoeleando or estacion is None:
+            # Soltó espacio o se alejó — cancela progreso
+            self.progreso_proceso = 0.0
+            self.estacion_actual  = None
+            return False
+
+        # Si cambió de estación, reinicia
+        if estacion is not self.estacion_actual:
+            self.progreso_proceso = 0.0
+            self.estacion_actual  = estacion
+
+        tiempo_requerido = estacion.tiempo_base * self.multiplicador_proceso
+        self.progreso_proceso += delta
+
+        if self.progreso_proceso >= tiempo_requerido:
+            self.progreso_proceso = 0.0
+            self.estacion_actual  = None
+            return True  # ¡completado!
+
+        return False
 
     def recoger_ingrediente(self, estacion):
-        """Recoge un ingrediente de una Despensa. Solo si tiene la mano vacía."""
         if self.ingrediente_en_mano is None:
             self.ingrediente_en_mano = estacion.obtener_ingrediente()
             return True
-        else:
-            print(f"{self.nombre} ya tiene un ingrediente en la mano")
-            return False
+        return False
 
     def usar_estacion(self, estacion):
-        """
-        Acción general de interacción con una estación de trabajo.
-        El chef coloca su ingrediente en la estación y esta lo procesa.
-        CORRECCIÓN: antes el ingrediente quedaba en mano después de procesarse,
-        lo que era inconsistente. Ahora procesar() modifica el ingrediente
-        in-place (cambia su estado), y el chef lo sigue teniendo en mano
-        listo para llevar a la siguiente estación o a la entrega.
-        """
         if self.ingrediente_en_mano is not None:
-            resultado = estacion.procesar(self.ingrediente_en_mano)
-            return resultado
-        else:
-            print(f"{self.nombre} no tiene ningún ingrediente")
-            return False
+            return estacion.procesar(self.ingrediente_en_mano)
+        return False
 
     def soltar_ingrediente(self):
-        """
-        Suelta el ingrediente que el chef tiene en mano.
-        AÑADIDO: necesario para que la EstacionEntrega pueda recoger
-        el ingrediente. El chef lo entrega y queda con mano vacía.
-        Retorna el ingrediente soltado, o None si no tenía nada.
-        """
         ingrediente = self.ingrediente_en_mano
         self.ingrediente_en_mano = None
         return ingrediente

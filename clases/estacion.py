@@ -1,14 +1,32 @@
-class Estacion:  # clase padre
-    def __init__(self, nombre, ingredientes_aceptados):
+class Estacion:
+    def __init__(self, nombre, ingredientes_aceptados, tiempo_base=0.0):
+        import pygame
         self.nombre = nombre
         self.ingredientes_aceptados = ingredientes_aceptados
-        # AÑADIDO: coordenadas para que el main pueda posicionar la estación
-        # y dibujarla sin necesidad de asignarlas desde afuera cada vez
-        self.x = 0
-        self.y = 0
+        self.tiempo_base = tiempo_base  # segundos base para holdeo (0 = instantáneo)
+        self._x = 0
+        self._y = 0
+        self.rect = pygame.Rect(0, 0, 75, 75)
+
+    @property
+    def x(self):
+        return self._x
+
+    @x.setter
+    def x(self, valor):
+        self._x = valor
+        self.rect.x = valor
+
+    @property
+    def y(self):
+        return self._y
+
+    @y.setter
+    def y(self, valor):
+        self._y = valor
+        self.rect.y = valor
 
     def puede_procesar(self, ingrediente):
-        # type() da la clase del ingrediente y revisa si está en la lista de aceptados
         return type(ingrediente) in self.ingredientes_aceptados
 
     def procesar(self, ingrediente):
@@ -23,25 +41,18 @@ class Estacion:  # clase padre
 
 
 class Despensa(Estacion):
-    # Despensa guarda un ingrediente específico e infinito (uno a la vez según enunciado)
     def __init__(self, nombre, ingrediente_fijo):
-        super().__init__(nombre, [type(ingrediente_fijo)])
+        super().__init__(nombre, [type(ingrediente_fijo)], tiempo_base=0.0)
         self.ingrediente_fijo = ingrediente_fijo
-        # CORRECCIÓN: PanesYBases tiene estado "listo" desde su __init__,
-        # así que la copia también lo tendrá automáticamente.
 
     def obtener_ingrediente(self):
-        # Crea una copia nueva del ingrediente cada vez que el chef interactúa
         return type(self.ingrediente_fijo)(self.ingrediente_fijo.nombre)
 
 
 class Cocina(Estacion):
-    # CORRECCIÓN DE NOMBRE: en el main se importa como "Cocina" desde estacion,
-    # pero también existe la clase Cocina del juego. El main ya lo resuelve con alias.
-    # Aquí solo nos aseguramos de que el nombre mostrado sea claro.
     def __init__(self):
         from clases.ingrediente import Proteina
-        super().__init__("Cocina", [Proteina])
+        super().__init__("Cocina", [Proteina], tiempo_base=2.0)
 
     def procesar(self, ingrediente):
         if self.puede_procesar(ingrediente):
@@ -55,10 +66,7 @@ class Cocina(Estacion):
 class TablaDeCortar(Estacion):
     def __init__(self):
         from clases.ingrediente import VegetalesYFrutas
-        # CORRECCIÓN: el nombre era "Tabla de cortar" (minúscula) pero en el
-        # diccionario SPRITES_ESTACIONES del main era "Tabla de Cortar" (mayúscula).
-        # Se unifica aquí para que el sprite se encuentre correctamente.
-        super().__init__("Tabla de Cortar", [VegetalesYFrutas])
+        super().__init__("Tabla de Cortar", [VegetalesYFrutas], tiempo_base=1.5)
 
     def procesar(self, ingrediente):
         if self.puede_procesar(ingrediente):
@@ -70,14 +78,9 @@ class TablaDeCortar(Estacion):
 
 
 class Freidora(Estacion):
-    # CORRECCIÓN SEGÚN ENUNCIADO: la freidora es para papas fritas, no para PanesYBases.
-    # El enunciado dice: "Freidora: utilizada para preparar papas fritas."
-    # PanesYBases es la categoría del pan (ya listo). Las papas son VegetalesYFrutas.
-    # Se cambia el tipo aceptado a VegetalesYFrutas y el estado resultante a "frito".
-    # Si en el futuro agregan una clase Papa específica, solo cambiar aquí.
     def __init__(self):
         from clases.ingrediente import VegetalesYFrutas
-        super().__init__("Freidora", [VegetalesYFrutas])
+        super().__init__("Freidora", [VegetalesYFrutas], tiempo_base=2.0)
 
     def procesar(self, ingrediente):
         if self.puede_procesar(ingrediente):
@@ -90,9 +93,26 @@ class Freidora(Estacion):
 
 class EstacionEntrega(Estacion):
     def __init__(self):
-        # Lista vacía porque no procesa ingredientes individuales, sino recetas completas
-        super().__init__("Entrega", [])
+        super().__init__("Entrega", [], tiempo_base=0.0)
 
     def entregar(self, receta, ingredientes):
-        # Delega la comparación a Receta.comparar_receta()
         return receta.comparar_receta(ingredientes)
+
+
+class MesaEnsamblaje(Estacion):
+    def __init__(self):
+        super().__init__("Ensamblaje", [], tiempo_base=0.0)
+        self.ingredientes_depositados = []
+
+    def depositar(self, ingrediente):
+        self.ingredientes_depositados.append(ingrediente)
+        return True
+
+    def recoger_todo(self):
+        """Retorna la lista y la vacía."""
+        items = list(self.ingredientes_depositados)
+        self.ingredientes_depositados.clear()
+        return items
+
+    def esta_vacia(self):
+        return len(self.ingredientes_depositados) == 0
