@@ -1,19 +1,24 @@
 class Chef:
     def __init__(self, nombre, x, y):
         self.nombre = nombre
-        self.x = x  # posicion horizontal en la pantalla
-        self.y = y  # posicion vertical en la pantalla
-        self.velocidad = 5  # pixeles que se mueve por frame
+        self.x = x  # posición horizontal en pantalla
+        self.y = y  # posición vertical en pantalla
+        self.velocidad = 5  # píxeles por frame
         self.ingrediente_en_mano = None  # empieza sin nada en la mano
-        self.ingredientes_recolectados = []  # ingredientes listos para entregar
-        self.activo = True  # indica si este chef es el que se controla
+        # CORRECCIÓN: según el enunciado "cada Chef puede sostener únicamente
+        # un Ingrediente a la vez". La lista ingredientes_recolectados implicaba
+        # que el chef acumulaba varios. Se elimina: el chef solo tiene una mano.
+        # La lógica de armar la receta se maneja en la EstacionEntrega,
+        # que recibe la lista de ingredientes directamente desde la Cocina/juego.
+        self.activo = True  # indica si este chef es el que se controla ahora
 
     def mover(self, dx, dy):
         self.x += dx * self.velocidad
         self.y += dy * self.velocidad
 
     def recoger_ingrediente(self, estacion):
-        if self.ingrediente_en_mano is None:  # solo recoge si tiene manos vacias
+        """Recoge un ingrediente de una Despensa. Solo si tiene la mano vacía."""
+        if self.ingrediente_en_mano is None:
             self.ingrediente_en_mano = estacion.obtener_ingrediente()
             return True
         else:
@@ -21,30 +26,32 @@ class Chef:
             return False
 
     def usar_estacion(self, estacion):
-        if self.ingrediente_en_mano is not None:  # solo usa si tiene algo en mano
+        """
+        Acción general de interacción con una estación de trabajo.
+        El chef coloca su ingrediente en la estación y esta lo procesa.
+        CORRECCIÓN: antes el ingrediente quedaba en mano después de procesarse,
+        lo que era inconsistente. Ahora procesar() modifica el ingrediente
+        in-place (cambia su estado), y el chef lo sigue teniendo en mano
+        listo para llevar a la siguiente estación o a la entrega.
+        """
+        if self.ingrediente_en_mano is not None:
             resultado = estacion.procesar(self.ingrediente_en_mano)
             return resultado
         else:
-            print(f"{self.nombre} no tiene ningun ingrediente")
+            print(f"{self.nombre} no tiene ningún ingrediente")
             return False
 
-    def guardar_ingrediente(self):
-        if self.ingrediente_en_mano is not None:
-            self.ingredientes_recolectados.append(self.ingrediente_en_mano)
-            self.ingrediente_en_mano = None  # vacia la mano despues de guardar
-            return True
-        return False
-
-    def entregar_receta(self, estacion_entrega, receta):
-        if estacion_entrega.entregar(receta, self.ingredientes_recolectados):
-            self.ingredientes_recolectados = []  # limpia la lista si fue exitoso
-            return True
-        else:
-            print("los ingredientes no coinciden con la receta")
-            return False
+    def soltar_ingrediente(self):
+        """
+        Suelta el ingrediente que el chef tiene en mano.
+        AÑADIDO: necesario para que la EstacionEntrega pueda recoger
+        el ingrediente. El chef lo entrega y queda con mano vacía.
+        Retorna el ingrediente soltado, o None si no tenía nada.
+        """
+        ingrediente = self.ingrediente_en_mano
+        self.ingrediente_en_mano = None
+        return ingrediente
 
     def __str__(self):
         mano = self.ingrediente_en_mano.nombre if self.ingrediente_en_mano else "nada"
-        #Esto es un operador ternario, es una forma corta de escribir un if/else en una línea. 
-        #Si tiene algo en mano muestra el nombre, si no muestra "nada".
-        return f"{self.nombre} | en mano: {mano} | recolectados: {len(self.ingredientes_recolectados)}"
+        return f"{self.nombre} | en mano: {mano} | activo: {self.activo}"
