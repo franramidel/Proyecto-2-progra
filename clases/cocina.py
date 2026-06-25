@@ -1,104 +1,117 @@
 import random
-import time
 
 
 class Cocina:
     def __init__(self, nombre, recetas_posibles, tiempo_juego, intervalo_recetas):
-        self.nombre = nombre               # nombre del escenario
-        self.recetas_posibles = recetas_posibles  # recetas que pueden aparecer
-        self.tiempo_juego = tiempo_juego   # duración total en segundos
-        self.tiempo_restante = tiempo_juego
-        self.intervalo_recetas = intervalo_recetas  # segundos entre cada nueva receta
-        self.tiempo_ultima_receta = 0.0    # CORRECCIÓN: antes usaba time.time() aquí,
-                                           # lo que provocaba que la primera receta tardara
-                                           # un intervalo completo en aparecer. Ahora empieza
-                                           # en 0 para que aparezca casi de inmediato.
-        self.chefs = []
-        self.estaciones = []
-        self.ordenes = []   # recetas activas en este momento
-        self.puntos = 0     # puntaje total del jugador
+        self._nombre             = nombre
+        self._recetas_posibles   = recetas_posibles
+        self._tiempo_juego       = tiempo_juego
+        self._tiempo_restante    = tiempo_juego
+        self._intervalo_recetas  = intervalo_recetas
+        self._tiempo_ultima_receta = 0.0
+        self._chefs              = []
+        self._estaciones         = []
+        self._ordenes            = []
+        self._puntos             = 0
 
+    # ── Propiedades de solo lectura / controladas ────────────────────
+    @property
+    def nombre(self):
+        return self._nombre
+
+    @property
+    def tiempo_restante(self):
+        return self._tiempo_restante
+
+    @property
+    def ordenes(self):
+        return self._ordenes
+
+    @property
+    def chefs(self):
+        return self._chefs
+
+    @property
+    def estaciones(self):
+        return self._estaciones
+
+    @property
+    def puntos(self):
+        return self._puntos
+
+    @puntos.setter
+    def puntos(self, valor):
+        """El puntaje nunca puede bajar de cero."""
+        self._puntos = max(0, valor)
+
+    # ── API pública ──────────────────────────────────────────────────
     def agregar_chef(self, chef):
-        self.chefs.append(chef)
+        self._chefs.append(chef)
 
     def agregar_estacion(self, estacion):
-        self.estaciones.append(estacion)
+        self._estaciones.append(estacion)
+
+    def sumar_puntos(self, cantidad):
+        """Suma puntos de forma controlada."""
+        self._puntos += cantidad
+
+    def restar_puntos(self, cantidad):
+        """Resta puntos sin bajar de cero."""
+        self._puntos = max(0, self._puntos - cantidad)
 
     def generar_receta(self):
         """
-        Elige una receta al azar de las posibles y crea una COPIA nueva.
-        CORRECCIÓN IMPORTANTE: antes se agregaba la misma instancia de Receta
-        a las órdenes, lo que significa que si la misma receta se generaba dos
-        veces, ambas órdenes compartían el mismo objeto (mismo tiempo, mismos puntos).
-        Ahora se crea una instancia nueva cada vez con los mismos parámetros.
+        Elige una receta al azar de las posibles y crea una copia nueva
+        para que cada orden sea una instancia independiente.
         """
-        plantilla = random.choice(self.recetas_posibles)
-        # Importación local para evitar ciclos de importación
+        plantilla = random.choice(self._recetas_posibles)
         from clases.receta import Receta
         nueva = Receta(
             plantilla.nombre,
-            list(plantilla.ingredientes),  # copia superficial de la lista de ingredientes
+            list(plantilla.ingredientes),
             plantilla.puntos_base,
             plantilla.tiempo_maximo
         )
-        self.ordenes.append(nueva)
+        self._ordenes.append(nueva)
         print(f"Nueva orden: {nueva.nombre}")
         return nueva
 
     def actualizar(self, delta):
-        """Llamar una vez por frame con el tiempo transcurrido desde el último frame."""
-        # 1. Descontar tiempo de la partida
-        self.tiempo_restante -= delta
+        """Llamar una vez por frame con el delta time."""
+        self._tiempo_restante -= delta
 
-        # 2. Generar receta si pasó el intervalo
-        # CORRECCIÓN: se acumula tiempo propio en vez de comparar con time.time(),
-        # para ser consistente con el sistema de delta del resto del juego.
-        self.tiempo_ultima_receta += delta
-        if self.tiempo_ultima_receta >= self.intervalo_recetas:
+        self._tiempo_ultima_receta += delta
+        if self._tiempo_ultima_receta >= self._intervalo_recetas:
             self.generar_receta()
-            self.tiempo_ultima_receta = 0.0  # reinicia el contador del intervalo
+            self._tiempo_ultima_receta = 0.0
 
-        # 3. Actualizar tiempo de cada orden activa
-        for orden in self.ordenes:
+        for orden in self._ordenes:
             orden.actualizar_tiempo(delta)
 
-        # 4. Eliminar órdenes expiradas y descontar puntos
-        # Se itera sobre una copia [:] para poder modificar la lista original
-        for orden in self.ordenes[:]:
+        for orden in self._ordenes[:]:
             if not orden.activa:
-                self.puntos -= orden.puntos_base  # descuenta el valor ORIGINAL
-                if self.puntos < 0:
-                    self.puntos = 0  # el puntaje mínimo es cero
-                self.ordenes.remove(orden)
+                self.restar_puntos(orden.puntos_base)
+                self._ordenes.remove(orden)
                 print(f"Orden expirada: {orden.nombre} (-{orden.puntos_base} puntos)")
 
     def entregar_orden(self, chef, receta, estacion_entrega):
-        """
-        El chef entrega los ingredientes que tiene en mano a la estación de entrega.
-        CORRECCIÓN: la lógica de comparación antes dependía de ingredientes_recolectados
-        (lista eliminada del Chef). Ahora la entrega funciona con un solo ingrediente
-        en mano por chef. Para recetas con varios ingredientes, ambos chefs deben
-        coordinar sus entregas — esto es parte de la jugabilidad cooperativa del enunciado.
-        Por simplicidad en esta base, se acepta que la entrega valide con lo que el
-        chef activo tiene en mano en ese momento.
-        """
         ingredientes_entregados = []
         if chef.ingrediente_en_mano is not None:
             ingredientes_entregados.append(chef.ingrediente_en_mano)
 
         if estacion_entrega.entregar(receta, ingredientes_entregados):
-            self.puntos += receta.puntos_actuales
-            chef.soltar_ingrediente()  # vacía la mano del chef
-            self.ordenes.remove(receta)
+            self.sumar_puntos(receta.puntos_actuales)
+            chef.soltar_ingrediente()
+            self._ordenes.remove(receta)
             print(f"Receta entregada: {receta.nombre} (+{receta.puntos_actuales} puntos)")
             return True
         return False
 
     def juego_terminado(self):
-        return self.tiempo_restante <= 0
+        return self._tiempo_restante <= 0
 
     def __str__(self):
-        return (f"{self.nombre} | "
-                f"Puntos: {self.puntos} | "
-                f"Tiempo: {self.tiempo_restante:.1f}s | "
-                f"Órdenes activas: {len(self.ordenes)}")
+        return (f"{self._nombre} | "
+                f"Puntos: {self._puntos} | "
+                f"Tiempo: {self._tiempo_restante:.1f}s | "
+                f"Órdenes activas: {len(self._ordenes)}")

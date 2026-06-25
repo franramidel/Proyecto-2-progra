@@ -6,6 +6,7 @@ from clases.estacion import Despensa, Cocina, TablaDeCortar, Freidora, EstacionE
 from clases.chef import Chef
 from clases.receta import Receta
 from clases.cocina import Cocina as CocinaJuego
+from clases.nivel import Nivel
 
 BLANCO   = (255, 255, 255)
 NEGRO    = (0, 0, 0)
@@ -48,6 +49,8 @@ fuente        = pygame.font.SysFont("arial", 18)
 fuente_titulo = pygame.font.SysFont("arial", 46)
 fuente_chica  = pygame.font.SysFont("arial", 14)
 
+SPRITE_PISO = None
+
 
 def cargar_sprite(ruta, tamano=None):
     try:
@@ -66,21 +69,20 @@ def oscurecer_sprite(sprite, factor=0.45):
     oscuro.fill((nivel, nivel, nivel, 255), special_flags=pygame.BLEND_RGB_MULT)
     return oscuro
 
-SPRITE_PISO = cargar_sprite("assets/floor.png", (CELDA, CELDA))
-
 SPRITES_ESTACIONES = {
-    "Despensa Tomate": cargar_sprite("assets/despensa_tomate.png", (CELDA-5, CELDA-5)),
-    "Despensa Pollo":  cargar_sprite("assets/despensa_pollo.png",  (CELDA-5, CELDA-5)),
-    "Despensa Pan":    cargar_sprite("assets/despensa_pan.png",    (CELDA-5, CELDA-5)),
-    "Tabla de Cortar": cargar_sprite("assets/tabla.png",           (CELDA-5, CELDA-5)),
-    "Cocina":          cargar_sprite("assets/estufa.png",          (CELDA-5, CELDA-5)),
-    "Freidora":        cargar_sprite("assets/freidora.png",        (CELDA-5, CELDA-5)),
-    "Entrega":         cargar_sprite("assets/entrega.png",         (CELDA-5, CELDA-5)),
-    "Ensamblaje":      cargar_sprite("assets/ensamblaje.png",      (CELDA-5, CELDA-5)),
+    "Despensa Tomate": cargar_sprite("assets/distom.png",   (CELDA-5, CELDA-5)),
+    "Despensa Pollo":  cargar_sprite("assets/dispoll.png",  (CELDA-5, CELDA-5)),
+    "Despensa Pan":    cargar_sprite("assets/dispan.png",   (CELDA-5, CELDA-5)),
+    "Despensa Papa":   cargar_sprite("assets/dispap.png",  (CELDA-5, CELDA-5)),
+    "Tabla de Cortar": cargar_sprite("assets/pic.jpg",      (CELDA-5, CELDA-5)),
+    "Cocina":          cargar_sprite("assets/oven.jpg",     (CELDA-5, CELDA-5)),
+    "Freidora":        cargar_sprite("assets/freidora.png", (CELDA-5, CELDA-5)),
+    "Entrega":         cargar_sprite("assets/entrega.png",  (CELDA-5, CELDA-5)),
+    "Ensamblaje":      cargar_sprite("assets/ensam.png",    (CELDA-5, CELDA-5)),
 }
 
-SPRITE_CHEF1        = cargar_sprite("assets/chef1.png", (CELDA-16, CELDA-16))
-SPRITE_CHEF2        = cargar_sprite("assets/chef2.png", (CELDA-16, CELDA-16))
+SPRITE_CHEF1        = cargar_sprite("assets/chef.png", (CELDA-16, CELDA-16))
+SPRITE_CHEF2        = cargar_sprite("assets/chef.png", (CELDA-16, CELDA-16))
 SPRITE_CHEF1_OSCURO = oscurecer_sprite(SPRITE_CHEF1)
 SPRITE_CHEF2_OSCURO = oscurecer_sprite(SPRITE_CHEF2)
 
@@ -112,12 +114,11 @@ def dibujar_estaciones(ventana, estaciones, fuente):
                 t = fuente_chica.render(p, True, NEGRO)
                 ventana.blit(t, (est.x + 4, est.y + 8 + i * 16))
 
-        # Si es mesa de ensamblaje, muestra cuadraditos de ingredientes depositados
-        if isinstance(est, MesaEnsamblaje):
-            for k, ing in enumerate(est.ingredientes_depositados[:4]):
-                dibujar_ingrediente_cuadrado(ventana, ing,
-                                             est.x + 12 + k * 16,
-                                             est.y + CELDA - 22)
+        # Muestra el ingrediente fusionado encima de la mesa
+        if isinstance(est, MesaEnsamblaje) and not est.esta_vacia():
+            dibujar_ingrediente_cuadrado(ventana, est.ingrediente_fusionado,
+                                         est.x + (CELDA - 5) // 2,
+                                         est.y + CELDA - 22)
 
 
 def dibujar_ingrediente_cuadrado(ventana, ingrediente, cx, cy, size=20):
@@ -133,13 +134,14 @@ def dibujar_ingrediente_cuadrado(ventana, ingrediente, cx, cy, size=20):
     rect = pygame.Rect(cx - size//2, cy - size//2, size, size)
     pygame.draw.rect(ventana, color_relleno, rect)
     pygame.draw.rect(ventana, color_borde,   rect, 3)
-    inicial = ingrediente.estado[0].upper()
-    t = fuente_chica.render(inicial, True, NEGRO)
+    if ingrediente.es_compuesto():
+        t = fuente_chica.render(str(len(ingrediente.componentes)), True, NEGRO)
+    else:
+        t = fuente_chica.render(ingrediente.estado[0].upper(), True, NEGRO)
     ventana.blit(t, (rect.x + 4, rect.y + 3))
 
 
 def dibujar_barra_progreso(ventana, chef, estaciones, dir_actual):
-    """Dibuja barra de progreso sobre la estación que está procesando el chef."""
     if chef.estacion_actual is None or chef.progreso_proceso <= 0:
         return
     est = chef.estacion_actual
@@ -311,170 +313,16 @@ def pantalla_seleccion_niveles(ventana, fuente, fuente_titulo, reloj):
         reloj.tick(60)
 
 
-def crear_nivel(id_nivel):
-    if id_nivel == "nivel_1":
-        return _nivel_1()
-    elif id_nivel == "nivel_2":
-        return _nivel_2()
-    elif id_nivel == "nivel_3":
-        return _nivel_3()
+def jugar_nivel(ventana, fuente, fuente_chica, reloj, nivel):
+    global SPRITE_PISO
 
+    cocina_juego = nivel.cocina_juego
+    estaciones   = nivel.estaciones
+    chef1        = nivel.chef1
+    chef2        = nivel.chef2
 
-def _chefs_default():
-    cx = COCINA_X + COCINA_ANCHO // 2
-    cy = COCINA_Y + COCINA_ALTO  // 2
-    # Chef1: cocinero — velocidad normal, procesa rápido
-    chef1 = Chef("Chef1", cx - CELDA, cy, velocidad=4, multiplicador_proceso=1.0)
-    # Chef2: ayudante — velocidad alta, procesa lento
-    chef2 = Chef("Chef2", cx + CELDA, cy, velocidad=7, multiplicador_proceso=3.0)
-    chef2.activo = False
-    return chef1, chef2
-
-
-def _nivel_1():
-    despensa_tomate = Despensa("Despensa Tomate", VegetalesYFrutas("Tomate"))
-    despensa_pollo  = Despensa("Despensa Pollo",  Proteina("Pollo"))
-    despensa_pan    = Despensa("Despensa Pan",     PanesYBases("Pan"))
-    tabla           = TablaDeCortar()
-    cocina_est      = Cocina()
-    freidora        = Freidora()
-    ensamblaje      = MesaEnsamblaje()
-    entrega         = EstacionEntrega()
-
-    despensa_tomate.x, despensa_tomate.y = COCINA_X,             COCINA_Y
-    despensa_pollo.x,  despensa_pollo.y  = COCINA_X + CELDA * 2, COCINA_Y
-    despensa_pan.x,    despensa_pan.y    = COCINA_X + CELDA * 4, COCINA_Y
-    tabla.x,           tabla.y           = COCINA_X,             COCINA_Y + CELDA * 2
-    cocina_est.x,      cocina_est.y      = COCINA_X,             COCINA_Y + CELDA * 4
-    freidora.x,        freidora.y        = COCINA_X + CELDA * 2, COCINA_Y + COCINA_ALTO - CELDA
-    ensamblaje.x,      ensamblaje.y      = COCINA_X + CELDA * 4, COCINA_Y + COCINA_ALTO - CELDA
-    entrega.x,         entrega.y         = COCINA_X + CELDA * 6, COCINA_Y + COCINA_ALTO - CELDA
-
-    estaciones = [despensa_tomate, despensa_pollo, despensa_pan,
-                  tabla, cocina_est, freidora, ensamblaje, entrega]
-
-    tomate_c = VegetalesYFrutas("Tomate"); tomate_c.estado = "cortado"
-    receta_ensalada = Receta("Ensalada", [tomate_c], 100, 30)
-
-    pollo_c = Proteina("Pollo"); pollo_c.estado = "cocinado"; pollo_c.cocinada = True
-    receta_pollo = Receta("Pollo Asado", [pollo_c], 150, 40)
-
-    cocina_juego = CocinaJuego("Oceano", [receta_ensalada, receta_pollo],
-                               tiempo_juego=120, intervalo_recetas=10)
-    chef1, chef2 = _chefs_default()
-    cocina_juego.agregar_chef(chef1)
-    cocina_juego.agregar_chef(chef2)
-    for est in estaciones:
-        cocina_juego.agregar_estacion(est)
-
-    return cocina_juego, estaciones, chef1, chef2
-
-
-def _nivel_2():
-    despensa_tomate = Despensa("Despensa Tomate", VegetalesYFrutas("Tomate"))
-    despensa_pollo  = Despensa("Despensa Pollo",  Proteina("Pollo"))
-    despensa_pan    = Despensa("Despensa Pan",     PanesYBases("Pan"))
-    despensa_papa   = Despensa("Despensa Papa",    VegetalesYFrutas("Papa"))
-    tabla           = TablaDeCortar()
-    cocina_est      = Cocina()
-    freidora        = Freidora()
-    ensamblaje      = MesaEnsamblaje()
-    entrega         = EstacionEntrega()
-
-    # Layout en U — estaciones más separadas
-    despensa_tomate.x, despensa_tomate.y = COCINA_X,             COCINA_Y
-    despensa_pollo.x,  despensa_pollo.y  = COCINA_X + CELDA * 3, COCINA_Y
-    despensa_pan.x,    despensa_pan.y    = COCINA_X + CELDA * 6, COCINA_Y
-    despensa_papa.x,   despensa_papa.y   = COCINA_X + CELDA * 6, COCINA_Y + CELDA * 2
-    tabla.x,           tabla.y           = COCINA_X,             COCINA_Y + CELDA * 2
-    cocina_est.x,      cocina_est.y      = COCINA_X,             COCINA_Y + CELDA * 4
-    freidora.x,        freidora.y        = COCINA_X + CELDA * 3, COCINA_Y + COCINA_ALTO - CELDA
-    ensamblaje.x,      ensamblaje.y      = COCINA_X + CELDA * 5, COCINA_Y + CELDA * 3
-    entrega.x,         entrega.y         = COCINA_X + CELDA * 6, COCINA_Y + COCINA_ALTO - CELDA
-
-    estaciones = [despensa_tomate, despensa_pollo, despensa_pan, despensa_papa,
-                  tabla, cocina_est, freidora, ensamblaje, entrega]
-
-    # Receta simple
-    tomate_c = VegetalesYFrutas("Tomate"); tomate_c.estado = "cortado"
-    receta_ensalada = Receta("Ensalada", [tomate_c], 100, 25)
-
-    # Receta 2 ingredientes: pollo + tomate cortado
-    pollo_c  = Proteina("Pollo");          pollo_c.estado = "cocinado"; pollo_c.cocinada = True
-    tomate_c2 = VegetalesYFrutas("Tomate"); tomate_c2.estado = "cortado"
-    receta_bowl = Receta("Pollo Bowl", [pollo_c, tomate_c2], 200, 45)
-
-    # Receta 2 ingredientes: papa frita + pollo
-    papa_f   = VegetalesYFrutas("Papa");   papa_f.estado = "frito"
-    pollo_c3 = Proteina("Pollo");          pollo_c3.estado = "cocinado"; pollo_c3.cocinada = True
-    receta_combo = Receta("Combo", [papa_f, pollo_c3], 220, 50)
-
-    cocina_juego = CocinaJuego("Selva", [receta_ensalada, receta_bowl, receta_combo],
-                               tiempo_juego=120, intervalo_recetas=8)
-    chef1, chef2 = _chefs_default()
-    cocina_juego.agregar_chef(chef1)
-    cocina_juego.agregar_chef(chef2)
-    for est in estaciones:
-        cocina_juego.agregar_estacion(est)
-
-    return cocina_juego, estaciones, chef1, chef2
-
-
-def _nivel_3():
-    despensa_tomate = Despensa("Despensa Tomate", VegetalesYFrutas("Tomate"))
-    despensa_pollo  = Despensa("Despensa Pollo",  Proteina("Pollo"))
-    despensa_pan    = Despensa("Despensa Pan",     PanesYBases("Pan"))
-    despensa_papa   = Despensa("Despensa Papa",    VegetalesYFrutas("Papa"))
-    tabla           = TablaDeCortar()
-    cocina_est      = Cocina()
-    freidora        = Freidora()
-    ensamblaje      = MesaEnsamblaje()
-    entrega         = EstacionEntrega()
-
-    # Layout disperso — máxima distancia entre estaciones relacionadas
-    despensa_tomate.x, despensa_tomate.y = COCINA_X,             COCINA_Y
-    despensa_pollo.x,  despensa_pollo.y  = COCINA_X + CELDA * 6, COCINA_Y
-    despensa_pan.x,    despensa_pan.y    = COCINA_X + CELDA * 6, COCINA_Y + CELDA * 2
-    despensa_papa.x,   despensa_papa.y   = COCINA_X,             COCINA_Y + CELDA * 4
-    tabla.x,           tabla.y           = COCINA_X + CELDA * 3, COCINA_Y
-    cocina_est.x,      cocina_est.y      = COCINA_X + CELDA * 3, COCINA_Y + COCINA_ALTO - CELDA
-    freidora.x,        freidora.y        = COCINA_X,             COCINA_Y + COCINA_ALTO - CELDA
-    ensamblaje.x,      ensamblaje.y      = COCINA_X + CELDA * 5, COCINA_Y + CELDA * 3
-    entrega.x,         entrega.y         = COCINA_X + CELDA * 6, COCINA_Y + COCINA_ALTO - CELDA
-
-    estaciones = [despensa_tomate, despensa_pollo, despensa_pan, despensa_papa,
-                  tabla, cocina_est, freidora, ensamblaje, entrega]
-
-    # Receta 2 ingredientes
-    pollo_c  = Proteina("Pollo");           pollo_c.estado = "cocinado"; pollo_c.cocinada = True
-    tomate_c = VegetalesYFrutas("Tomate");  tomate_c.estado = "cortado"
-    receta_bowl = Receta("Pollo Bowl", [pollo_c, tomate_c], 200, 35)
-
-    # Receta 3 ingredientes: pan + pollo + tomate
-    pan      = PanesYBases("Pan")
-    pollo_c2 = Proteina("Pollo");           pollo_c2.estado = "cocinado"; pollo_c2.cocinada = True
-    tomate_c2 = VegetalesYFrutas("Tomate"); tomate_c2.estado = "cortado"
-    receta_sandwich = Receta("Sandwich", [pan, pollo_c2, tomate_c2], 300, 50)
-
-    # Receta 3 ingredientes: papa frita + pollo + tomate
-    papa_f   = VegetalesYFrutas("Papa");    papa_f.estado = "frito"
-    pollo_c3 = Proteina("Pollo");           pollo_c3.estado = "cocinado"; pollo_c3.cocinada = True
-    tomate_c3 = VegetalesYFrutas("Tomate"); tomate_c3.estado = "cortado"
-    receta_plato = Receta("Plato Fuerte", [papa_f, pollo_c3, tomate_c3], 350, 60)
-
-    cocina_juego = CocinaJuego("Espacio", [receta_bowl, receta_sandwich, receta_plato],
-                               tiempo_juego=120, intervalo_recetas=6)
-    chef1, chef2 = _chefs_default()
-    cocina_juego.agregar_chef(chef1)
-    cocina_juego.agregar_chef(chef2)
-    for est in estaciones:
-        cocina_juego.agregar_estacion(est)
-
-    return cocina_juego, estaciones, chef1, chef2
-
-
-def jugar_nivel(ventana, fuente, fuente_chica, reloj,
-                cocina_juego, estaciones, chef1, chef2):
+    nivel.cargar_assets(CELDA)
+    SPRITE_PISO = nivel.sprite_piso
 
     chef_activo   = chef1
     ultimo_tiempo = time.time()
@@ -482,21 +330,21 @@ def jugar_nivel(ventana, fuente, fuente_chica, reloj,
     flotantes     = []
 
     rects_estaciones = [est.rect for est in estaciones]
+    mesa = next((e for e in estaciones if isinstance(e, MesaEnsamblaje)), None)
 
     while not cocina_juego.juego_terminado():
         ahora = time.time()
         delta = min(ahora - ultimo_tiempo, 0.05)
         ultimo_tiempo = ahora
 
-        teclas     = pygame.key.get_pressed()
-        hoeleando  = teclas[pygame.K_SPACE]
+        teclas    = pygame.key.get_pressed()
+        hoeleando = teclas[pygame.K_SPACE]
         dx = int(teclas[pygame.K_RIGHT]) - int(teclas[pygame.K_LEFT])
         dy = int(teclas[pygame.K_DOWN])  - int(teclas[pygame.K_UP])
 
         if dx != 0 or dy != 0:
             dir_actual = [dx, dy]
 
-        # Detectar estación frente al chef activo
         rect_frente = chef_activo.rect_interaccion(*dir_actual)
         estacion_frente = None
         for est in estaciones:
@@ -504,10 +352,10 @@ def jugar_nivel(ventana, fuente, fuente_chica, reloj,
                 estacion_frente = est
                 break
 
-        # Actualizar holdeo — solo para estaciones de proceso (tiempo_base > 0)
         fx = chef_activo.x + (CELDA - 16) // 2
         fy = chef_activo.y
 
+        # Holdeo para estaciones de proceso
         if (estacion_frente is not None
                 and estacion_frente.tiempo_base > 0
                 and chef_activo.ingrediente_en_mano is not None
@@ -524,13 +372,15 @@ def jugar_nivel(ventana, fuente, fuente_chica, reloj,
                 else:
                     agregar_flotante(flotantes, "No puedes", fx, fy, ROJO)
         else:
-            chef_activo.actualizar_holdeo(False, None, delta)  # cancela progreso
+            chef_activo.actualizar_holdeo(False, None, delta)
 
         for evento in pygame.event.get():
             if evento.type == pygame.QUIT:
                 return "salir"
 
             if evento.type == pygame.KEYDOWN:
+
+                # TAB: cambiar chef activo
                 if evento.key == pygame.K_TAB:
                     if chef_activo == chef1:
                         chef_activo = chef2
@@ -540,10 +390,12 @@ def jugar_nivel(ventana, fuente, fuente_chica, reloj,
                         chef1.activo, chef2.activo = True, False
                     dir_actual = [0, 0]
 
-                # Acciones instantáneas con ESPACIO (despensa, ensamblaje, entrega)
+                # ESPACIO: acciones instantáneas
                 if evento.key == pygame.K_SPACE:
                     if estacion_frente is None:
                         pass
+
+                    # Despensa: recoger ingrediente
                     elif isinstance(estacion_frente, Despensa):
                         if chef_activo.recoger_ingrediente(estacion_frente):
                             agregar_flotante(flotantes,
@@ -552,26 +404,31 @@ def jugar_nivel(ventana, fuente, fuente_chica, reloj,
                         else:
                             agregar_flotante(flotantes, "Manos llenas", fx, fy, ROJO)
 
+                    # Mesa de ensamblaje
                     elif isinstance(estacion_frente, MesaEnsamblaje):
                         if chef_activo.ingrediente_en_mano is not None:
+                            # Chef tiene algo: depositar y fusionar en la mesa
                             ing = chef_activo.soltar_ingrediente()
                             estacion_frente.depositar(ing)
-                            agregar_flotante(flotantes, f"{ing.nombre} depositado",
-                                             fx, fy, MORADO)
+                            if estacion_frente.ingrediente_fusionado.es_compuesto():
+                                n = len(estacion_frente.ingrediente_fusionado.componentes)
+                                agregar_flotante(flotantes, f"Fusionado ({n})", fx, fy, MORADO)
+                            else:
+                                agregar_flotante(flotantes, f"{ing.nombre} en mesa",
+                                                 fx, fy, MORADO)
                         else:
-                            # Sin ingrediente: recoge todo lo de la mesa
-                            items = estacion_frente.recoger_todo()
-                            if items:
+                            # Chef sin nada: recoger el ingrediente fusionado
+                            ing = estacion_frente.recoger()
+                            if ing is not None:
+                                chef_activo.ingrediente_en_mano = ing
                                 agregar_flotante(flotantes, "Recogido", fx, fy, BLANCO)
+                            else:
+                                agregar_flotante(flotantes, "Mesa vacía", fx, fy, GRIS)
 
+                    # Estación de entrega
                     elif isinstance(estacion_frente, EstacionEntrega):
-                        # Intenta entregar con ingredientes de la mesa de ensamblaje
-                        mesa = next((e for e in estaciones
-                                     if isinstance(e, MesaEnsamblaje)), None)
                         ingredientes_a_entregar = []
-                        if mesa and not mesa.esta_vacia():
-                            ingredientes_a_entregar = list(mesa.ingredientes_depositados)
-                        elif chef_activo.ingrediente_en_mano is not None:
+                        if chef_activo.ingrediente_en_mano is not None:
                             ingredientes_a_entregar = [chef_activo.ingrediente_en_mano]
 
                         entregado = False
@@ -582,18 +439,18 @@ def jugar_nivel(ventana, fuente, fuente_chica, reloj,
                                                  f"+{orden.puntos_actuales} pts",
                                                  fx, fy, AMARILLO)
                                 cocina_juego.ordenes.remove(orden)
-                                if mesa and not mesa.esta_vacia():
-                                    mesa.ingredientes_depositados.clear()
-                                elif chef_activo.ingrediente_en_mano is not None:
-                                    chef_activo.soltar_ingrediente()
+                                chef_activo.soltar_ingrediente()
                                 entregado = True
                                 break
                         if not entregado:
                             agregar_flotante(flotantes, "No coincide", fx, fy, ROJO)
 
-                # Q: soltar ingrediente
+                # Q: limpiar mesa si está frente a ella, si no soltar ingrediente
                 if evento.key == pygame.K_q:
-                    if chef_activo.ingrediente_en_mano is not None:
+                    if estacion_frente is not None and isinstance(estacion_frente, MesaEnsamblaje):
+                        estacion_frente.limpiar()
+                        agregar_flotante(flotantes, "Mesa limpiada", fx, fy, GRIS)
+                    elif chef_activo.ingrediente_en_mano is not None:
                         chef_activo.soltar_ingrediente()
                         agregar_flotante(flotantes, "Soltado", fx, fy, GRIS)
 
@@ -630,10 +487,9 @@ def pantalla_fin(ventana, fuente, fuente_titulo, cocina_juego):
     time.sleep(3)
 
 
+# ── Loop principal ───────────────────────────────────────────────────────────
 estado       = "menu"
-cocina_juego = None
-estaciones   = None
-chef1 = chef2 = None
+nivel_actual = None
 
 while estado != "salir":
 
@@ -649,14 +505,13 @@ while estado != "salir":
         elif resultado == "salir":
             estado = "salir"
         else:
-            cocina_juego, estaciones, chef1, chef2 = crear_nivel(resultado)
+            nivel_actual = Nivel(resultado)
             estado = "jugando"
 
     elif estado == "jugando":
-        resultado = jugar_nivel(ventana, fuente, fuente_chica, reloj,
-                                cocina_juego, estaciones, chef1, chef2)
+        resultado = jugar_nivel(ventana, fuente, fuente_chica, reloj, nivel_actual)
         if resultado == "fin":
-            pantalla_fin(ventana, fuente, fuente_titulo, cocina_juego)
+            pantalla_fin(ventana, fuente, fuente_titulo, nivel_actual.cocina_juego)
             estado = "menu"
         else:
             estado = "salir"
